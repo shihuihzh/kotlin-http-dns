@@ -20,14 +20,30 @@ const val DEFAULT_TTL = 600
 data class Query(val name: String, val srcName: ArrayList<String>, val type: Short = ONE, val cls: Short = ZERO)
 data class Answer(val namePoint: Short = 0xc00c.toShort(), val type: Short = ONE, val cls: Short = ONE, val ttl: Int = DEFAULT_TTL, val length: Short = 4.toShort(), val data: ByteArray)
 
-data class Header(val id: Short, val flag: Short, val quesCount: Short, val ansCount: Short, val authCount: Short = ZERO, val addiCount: Short = ZERO)
+data class Flag(val qr: Byte = 0, val opCode: Byte = 0, val  aa: Byte = 0, val  tc: Byte = 0, val  rd: Byte = 0, val ra: Byte = 0, val z: Byte = 0, val rCode: Byte = 0) {
+    var flag: Int = 0
+
+    init {
+        flag = (qr.toInt() shl 15) or (opCode.toInt() shl 11) or (aa.toInt() shl 10) or (tc.toInt() shl 9) or (rd.toInt() shl 8) or (ra.toInt() shl 7) or (z.toInt() shl 4) or (rCode.toInt())
+    }
+
+    constructor(flag: Int) : this((flag shr 15).toByte(),
+        (flag shr 11 and 0xf).toByte(),
+        (flag shr 10 and 0x1).toByte(),
+        (flag shr 9 and 0x1).toByte(), (flag shr 8 and 0x1).toByte(),
+        (flag shr 7 and 0x1).toByte(), (flag shr 4 and 0x7).toByte(), (flag and 0xf).toByte()
+    ) {
+        this.flag = flag
+    }
+}
+data class Header(val id: Short, val flag: Flag, val quesCount: Short, val ansCount: Short, val authCount: Short = ZERO, val addiCount: Short = ZERO)
 data class DNSReq(val header: Header, val queries: ArrayList<Query>)
 data class DNSRsp(val header: Header, val queries: ArrayList<Query>, val answers: ArrayList<Answer>)
 
 fun Header.toByteBuffer(): ByteBuffer {
     val data = ByteBuffer.allocate(12)
     data.putShort(this.id)
-    data.putShort(this.flag)
+    data.putShort(this.flag.flag.toShort())
     data.putShort(this.quesCount)
     data.putShort(this.ansCount)
     data.putShort(this.authCount)
@@ -80,7 +96,7 @@ fun DNSRsp.toByteBuffer(): ByteBuffer {
 
 fun buildReq(data: ByteBuffer): DNSReq {
 
-    val header = Header(data.short, data.short, data.short, data.short, data.short, data.short)
+    val header = Header(data.short, Flag(data.short.toInt()), data.short, data.short, data.short, data.short)
     val queries = ArrayList<Query>(header.quesCount.toInt());
 
     // queries
@@ -104,7 +120,7 @@ fun buildReq(data: ByteBuffer): DNSReq {
 
 fun buildRsp(req: DNSReq, nameAndIps: Map<String, ArrayList<ByteArray>>): DNSRsp {
     val ansCount = nameAndIps.values.sumBy { it.size }
-    val header = Header(req.header.id, 0x9c8d.toShort(), req.header.quesCount, ansCount.toShort())
+    val header = Header(req.header.id, Flag(0x9c8d), req.header.quesCount, ansCount.toShort())
     val answers = ArrayList<Answer>(ansCount)
 
     var point = 0xc00c
@@ -146,9 +162,7 @@ class DnsServer(val port: Int, val reuqestUrl: String, val separator: String) {
         println("DNS start at port:$port...")
 
 
-        /** 外循环，已经发生了SelectionKey数目 */
         while (selector.select() > 0) {
-            /* 得到已经被捕获了的SelectionKey的集合 */
             val iterator = selector.selectedKeys().iterator()
             while (iterator.hasNext()) {
                 var key: SelectionKey? = null
@@ -188,11 +202,11 @@ class DnsServer(val port: Int, val reuqestUrl: String, val separator: String) {
 
         if(byteBuf.limit() > 0) {
             val req = buildReq(byteBuf)
-            println(req)
+            println("start resolve: $req")
             val rsp = buildRsp(
                 req, getResolve(req.queries)
             )
-            println(rsp)
+            println("resolve result: $rsp")
             ch.send(rsp.toByteBuffer(), client) // 将消息回送给客户端
         }
     }
@@ -215,8 +229,6 @@ class DnsServer(val port: Int, val reuqestUrl: String, val separator: String) {
                 inputLine = input.readLine()
             }
             input.close()
-            println(result)
-
             if(!result.trim().equals("")) {
                 nameAndIps.put(it.name, parseAllIP(result));
 
@@ -240,7 +252,5 @@ class DnsServer(val port: Int, val reuqestUrl: String, val separator: String) {
 
         return list
     }
-
-
 }
 
